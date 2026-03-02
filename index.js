@@ -88,7 +88,8 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
     return response;
   } catch (err) {
     clearTimeout(id);
-    throw err;
+    console.error('Erro em fetchWithTimeout:', err.message);
+    return null;
   }
 }
 
@@ -162,7 +163,7 @@ app.use((req, res, next) => {
   console.log("HTTP", req.method, req.url);
   next();
 });
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 
 // Validação de variáveis obrigatórias
 if (!process.env.IHELP_TOKEN || !process.env.IHELP_CANAL_ID || !process.env.IHELP_IA_USER_ID || !process.env.IHELP_API_BASE) {
@@ -323,7 +324,9 @@ app.get('/', (req, res) => {
   res.send('Zenith IA online ✅');
 });
 
-app.post('/ihelp', async (req, res) => {
+app.post(['/ihelp', '/pt/ihelp'], async (req, res) => {
+  // Força resposta direta, sem redirecionamento
+  res.setHeader('X-Direct-Response', 'true');
   try {
     const { event, message } = req.body;
 
