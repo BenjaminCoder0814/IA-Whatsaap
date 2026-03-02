@@ -1,3 +1,75 @@
+// Importa o cérebro estratégico
+const { gerarResposta } = require("./iaBrain");
+// Personalidade e contexto da IA
+const promptBase = `
+Você é ZENITH IA (Vendas), especialista em lacres industriais.
+Seu objetivo é conduzir o cliente até o fechamento da venda.
+Nunca dê desconto automaticamente.
+Sempre pergunte volume e aplicação antes de passar preço.
+Se o cliente demonstrar urgência, conduza para pedido imediato.
+Tom de voz: profissional, seguro, técnico, direto.
+`;
+
+const estilo = `
+Responda de forma clara, segura e estratégica.
+Seja objetivo.
+Evite textos longos demais.
+Use persuasão baseada em autoridade e experiência.
+`;
+
+// Controle de estágio por callId
+const estagios = {};
+
+function classificarIntencao(texto) {
+  const t = texto.toLowerCase();
+  if (t.includes("preço") || t.includes("valor")) return "preco";
+  if (t.includes("prazo")) return "prazo";
+  if (t.includes("catálogo")) return "catalogo";
+  if (t.includes("quantidade") || t.includes("volume")) return "volume";
+  if (t.includes("desconto")) return "desconto";
+  if (t.includes("outro fornecedor")) return "concorrente";
+  return "geral";
+}
+
+function gerarRespostaComercial(callId, texto) {
+  // Inicializa estágio se não existir
+  if (!estagios[callId]) {
+    estagios[callId] = { etapa: "qualificacao", produto: null, volume: null };
+  }
+  const intencao = classificarIntencao(texto);
+  let resposta = "";
+  switch (intencao) {
+    case "preco":
+      resposta = "Antes de passar o preço, poderia informar a aplicação e o volume aproximado?";
+      estagios[callId].etapa = "preco";
+      break;
+    case "prazo":
+      resposta = "Qual a urgência do seu pedido? Assim consigo te ajudar melhor.";
+      estagios[callId].etapa = "prazo";
+      break;
+    case "catalogo":
+      resposta = "Posso te enviar nosso catálogo digital. Qual produto você procura?";
+      estagios[callId].etapa = "catalogo";
+      break;
+    case "volume":
+      resposta = "Ótimo! Qual a aplicação do lacre? Precisa para caminhão, container ou outro uso?";
+      estagios[callId].volume = texto.match(/\d+/)?.[0] || null;
+      estagios[callId].etapa = "volume";
+      break;
+    case "desconto":
+      resposta = "Trabalhamos sempre com qualidade e segurança. O diferencial Zenith é o suporte técnico e entrega rápida.";
+      estagios[callId].etapa = "desconto";
+      break;
+    case "concorrente":
+      resposta = "Nossos lacres têm certificação e garantia. Posso te mostrar os diferenciais técnicos?";
+      estagios[callId].etapa = "concorrente";
+      break;
+    default:
+      resposta = "Me conte um pouco mais sobre sua necessidade para eu te ajudar da melhor forma.";
+      estagios[callId].etapa = "qualificacao";
+  }
+  return `${promptBase}\n${estilo}\n${resposta}`;
+}
 // Helper fetchWithTimeout
 let fetch;
 try {
@@ -44,7 +116,8 @@ async function sendMessageIhelp(contato, texto) {
   }
 }
 
-async function getCallDetails(callId) {
+// Função para checar se há humano ativo
+async function temHumanoAtivo(callId) {
   try {
     const response = await fetchWithTimeout(`${process.env.IHELP_API_BASE}/api/v2/customers/${callId}`, {
       method: 'GET',
@@ -54,11 +127,14 @@ async function getCallDetails(callId) {
       },
     });
     if (!response.ok) throw new Error(`Erro HTTP: ${response.status}`);
-    const dados = await response.json();
-    return dados.atendimentoUsuarios || [];
+    const data = await response.json();
+    if (data?.dados?.atendimentoUsuarios?.length > 0) {
+      return true;
+    }
+    return false;
   } catch (err) {
     console.error('Erro ao consultar atendimento:', err);
-    return [];
+    return false;
   }
 }
 
@@ -148,7 +224,10 @@ function responder(mensagemBruta) {
   return 'Me diga a aplicação do lacre e a quantidade aproximada para eu ajudar.';
 }
 
-function gerarResposta(mensagemBruta) {
+function gerarResposta(mensagemBruta, callId = null) {
+  if (callId) {
+    return gerarRespostaComercial(callId, mensagemBruta);
+  }
   return responder(mensagemBruta);
 }
 
@@ -292,18 +371,17 @@ app.post('/ihelp', async (req, res) => {
       console.error('Erro ao consultar atendimento:', err);
     }
 
-    // 6) Verificar se há humano
-    const humanoAtivo = atendimentoUsuarios.some(u => String(u.id) !== String(process.env.IHELP_IA_USER_ID));
-    if (humanoAtivo) {
+    // 6) Verificar se há humano ativo
+    if (await temHumanoAtivo(callId)) {
       console.log('Humano ativo, IA não respondeu');
       return res.status(200).json({ ok: true, skipped: 'human_present' });
     }
 
     // 7) Caso não haja humano, gerar resposta e enviar
     try {
-      const resposta = gerarResposta(texto);
+      const resposta = gerarResposta(callId, texto);
       await sendMessageIhelp(telefone, resposta);
-      console.log('IA respondeu');
+      console.log('IA respondeu:', resposta);
     } catch (err) {
       console.error('Erro ao responder via IA:', err);
     }
