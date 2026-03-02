@@ -1,5 +1,10 @@
 // Função para enviar mensagem via IHELP
-const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+let fetch;
+try {
+  fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+} catch (err) {
+  console.error('Dependência node-fetch ausente. Adicione ao package.json.');
+}
 
 async function sendMessageIhelp(contato, texto) {
   try {
@@ -60,6 +65,11 @@ const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Validação de variáveis obrigatórias
+if (!process.env.IHELP_TOKEN || !process.env.IHELP_CANAL_ID || !process.env.IHELP_IA_USER_ID || !process.env.IHELP_API_BASE) {
+  console.error('❌ Variáveis obrigatórias ausentes no .env. Verifique IHELP_TOKEN, IHELP_CANAL_ID, IHELP_IA_USER_ID, IHELP_API_BASE.');
+}
 const DATA_DIR = path.join(__dirname, 'data', 'conversas');
 const IHELP_TOKEN = process.env.IHELP_TOKEN || process.env.IHELP_API_TOKEN; // mantém compat com nome antigo
 const IHELP_CANAL_ID = process.env.IHELP_CANAL_ID;
