@@ -1,0 +1,291 @@
+// Função para enviar mensagem via IHELP
+const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+
+async function sendMessageIhelp(contato, texto) {
+  try {
+    const response = await fetch(`${process.env.IHELP_API_BASE}/api/v2/customers/send-message`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.IHELP_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        texto,
+        canalId: process.env.IHELP_CANAL_ID,
+        contato,
+        messageType: 0,
+      }),
+    });
+    if (!response.ok) throw new Error(`Erro HTTP: ${response.status}`);
+    console.log('IA respondeu');
+    return await response.json();
+  } catch (err) {
+    console.error('Erro ao enviar mensagem IHELP:', err);
+    return null;
+  }
+}
+
+async function getCallDetails(callId) {
+  try {
+    const response = await fetch(`${process.env.IHELP_API_BASE}/api/v2/customers/${callId}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${process.env.IHELP_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    if (!response.ok) throw new Error(`Erro HTTP: ${response.status}`);
+    const dados = await response.json();
+    return dados.atendimentoUsuarios || [];
+  } catch (err) {
+    console.error('Erro ao consultar atendimento:', err);
+    return [];
+  }
+}
+
+// Proteção contra flood
+const floodCache = new Map(); // callId -> timestamp
+function isFlood(callId) {
+  const now = Date.now();
+  const last = floodCache.get(callId);
+  if (last && now - last < 3000) return true;
+  floodCache.set(callId, now);
+  return false;
+}
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+const DATA_DIR = path.join(__dirname, 'data', 'conversas');
+const IHELP_TOKEN = process.env.IHELP_TOKEN || process.env.IHELP_API_TOKEN; // mantém compat com nome antigo
+const IHELP_CANAL_ID = process.env.IHELP_CANAL_ID;
+const IHELP_IA_USER_ID = process.env.IHELP_IA_USER_ID;
+const IHELP_API_BASE_SEND = process.env.IHELP_API_BASE_SEND || 'https://api.ihelpchat.com';
+const IHELP_API_BASE_V3 = process.env.IHELP_API_BASE_V3 || 'https://apiv3.ihelpchat.com';
+const IHELP_API_SEND_MESSAGE = `${IHELP_API_BASE_SEND}/api/v2/customers/send-message`;
+const IHELP_API_CUSTOMER = (callId) => `${IHELP_API_BASE_V3}/api/v2/customers/${callId}`;
+
+fs.mkdirSync(DATA_DIR, { recursive: true });
+
+app.use(cors());
+app.use(express.json({ limit: '1mb' }));
+
+const attendanceCache = new Map(); // callId -> { hasHuman: boolean, ts: number }
+
+function extractMessageAndPhone(body) {
+  let mensagem = body?.mensagem ?? body?.message ?? body?.text ?? body?.input ?? body?.cliente?.mensagem;
+  if (!mensagem) {
+    try {
+      mensagem = JSON.stringify(body);
+    } catch (err) {
+      mensagem = String(body);
+    }
+  }
+
+  let telefone = body?.telefone ?? body?.phone ?? body?.from ?? body?.contact ?? body?.cliente?.telefone ?? 'desconhecido';
+
+  return {
+    mensagem: typeof mensagem === 'string' ? mensagem : String(mensagem),
+    telefone: typeof telefone === 'string' ? telefone : 'desconhecido',
+  };
+}
+
+function responder(mensagemBruta) {
+  const normalizeText = (s) =>
+    String(s || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+
+  const textoNormalizado = normalizeText(mensagemBruta);
+
+  if (textoNormalizado.includes('preco') || textoNormalizado.includes('valor')) {
+    return 'Para enviar a cotação, me informe CNPJ, cidade/UF e volume aproximado de lacres.';
+  }
+
+  if (textoNormalizado.includes('lacre') && textoNormalizado.includes('caminhao')) {
+    return 'Temos lacres para caminhão. É graneleiro, baú ou carreta?';
+  }
+
+  if (textoNormalizado.includes('container') || textoNormalizado.includes('navio')) {
+    return 'Recomendo lacre para container. Qual o destino e a urgência do embarque?';
+  }
+
+  return 'Me diga a aplicação do lacre e a quantidade aproximada para eu ajudar.';
+}
+
+function gerarResposta(mensagemBruta) {
+  return responder(mensagemBruta);
+}
+
+function normalizeNumber(num) {
+  return String(num || '').replace(/\D/g, '');
+}
+
+function extractTextFromPayload(body) {
+  // iHelp payload pode variar; tente chaves comuns e caia para JSON.
+  const candidates = [
+    body?.message?.text,
+    body?.message?.body,
+    body?.message?.content,
+    body?.mensagem,
+    body?.message,
+    body?.text,
+    body?.input,
+    body?.cliente?.mensagem,
+  ];
+  for (const c of candidates) {
+    if (typeof c === 'string' && c.trim()) return c;
+  }
+  try {
+    return JSON.stringify(body);
+  } catch (err) {
+    return String(body);
+  }
+}
+
+function isCacheFresh(entry) {
+  if (!entry) return false;
+  const TEN_SECONDS = 10 * 1000;
+  return Date.now() - entry.ts < TEN_SECONDS;
+}
+
+async function hasHumanInAttendance(callId) {
+  if (!callId) return false;
+
+  if (!IHELP_TOKEN) {
+    console.warn('IHELP_TOKEN não configurado; assumindo que não há humano no atendimento.');
+    return false;
+  }
+
+  const cached = attendanceCache.get(callId);
+  if (isCacheFresh(cached)) {
+    return cached.hasHuman;
+  }
+
+  try {
+    const resp = await fetch(IHELP_API_CUSTOMER(callId), {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${IHELP_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!resp.ok) {
+      console.error('Erro ao consultar atendimento iHelp', resp.status, resp.statusText);
+      attendanceCache.set(callId, { hasHuman: false, ts: Date.now() });
+      return false;
+    }
+
+    const data = await resp.json();
+    const usuarios = data?.dados?.atendimentoUsuarios || data?.dados?.atendimento?.usuarios || [];
+    const hasHuman = Array.isArray(usuarios)
+      ? usuarios.some((u) => u?.id && String(u.id) !== String(IHELP_IA_USER_ID))
+      : false;
+
+    attendanceCache.set(callId, { hasHuman, ts: Date.now() });
+    return hasHuman;
+  } catch (err) {
+    console.error('Falha ao checar humanos no atendimento', err);
+    attendanceCache.set(callId, { hasHuman: false, ts: Date.now() });
+    return false;
+  }
+}
+
+function loadHistory(telefone) {
+  const filePath = path.join(DATA_DIR, `${telefone}.json`);
+  if (fs.existsSync(filePath)) {
+    try {
+      const data = fs.readFileSync(filePath, 'utf-8');
+      return JSON.parse(data);
+    } catch (err) {
+      // Se o arquivo estiver corrompido, reinicia o histórico
+      return { telefone, historico: [] };
+    }
+  }
+  return { telefone, historico: [] };
+}
+
+function saveHistory(telefone, historico) {
+  const filePath = path.join(DATA_DIR, `${telefone}.json`);
+  const payload = { telefone, historico: historico.slice(-20) };
+  fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf-8');
+}
+
+app.get('/', (req, res) => {
+  res.send('Zenith IA online ✅');
+});
+
+app.post('/ihelp', async (req, res) => {
+  try {
+    console.log('IHELP_PAYLOAD', JSON.stringify(req.body));
+
+    // 1) Ignorar eventos que não sejam "MessageReceive"
+    if (req.body?.event !== 'MessageReceive') {
+      return res.status(200).json({ ok: true, ignored: 'not MessageReceive' });
+    }
+
+    const msg = req.body?.message || {};
+
+    // 2) Ignorar mensagens onde fromMe === true
+    if (msg.fromMe === true) {
+      return res.status(200).json({ ok: true, ignored: 'fromMe' });
+    }
+
+    // 3) Ignorar messageType diferente de "Text"
+    if (msg.messageType && msg.messageType !== 'Text') {
+      return res.status(200).json({ ok: true, ignored: 'non-text' });
+    }
+
+    // 4) Extrair callId, whatsAppNumber, texto
+    const callId = msg.callId || req.body?.callId;
+    const telefoneRaw = msg.whatsAppNumber || msg.phone || msg.from || req.body?.telefone;
+    const telefone = normalizeNumber(telefoneRaw || '');
+    const texto = extractTextFromPayload(req.body || {});
+
+    // 6) Proteção contra flood
+    if (isFlood(callId)) {
+      console.log('Flood detectado, ignorando callId:', callId);
+      return res.status(200).json({ ok: true, ignored: 'flood' });
+    }
+
+    // 5) Consultar atendimento
+    let atendimentoUsuarios = [];
+    try {
+      atendimentoUsuarios = await getCallDetails(callId);
+    } catch (err) {
+      console.error('Erro ao consultar atendimento:', err);
+    }
+
+    // 6) Verificar se há humano
+    const humanoAtivo = atendimentoUsuarios.some(u => String(u.id) !== String(process.env.IHELP_IA_USER_ID));
+    if (humanoAtivo) {
+      console.log('Humano ativo, IA não respondeu');
+      return res.status(200).json({ ok: true, skipped: 'human_present' });
+    }
+
+    // 7) Caso não haja humano, gerar resposta e enviar
+    try {
+      const resposta = gerarResposta(texto);
+      await sendMessageIhelp(telefone, resposta);
+      console.log('IA respondeu');
+    } catch (err) {
+      console.error('Erro ao responder via IA:', err);
+    }
+
+    // 8) Sempre retornar 200 { ok: true }
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('Erro no /ihelp', err);
+    return res.status(200).json({ ok: true });
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`Servidor iniciado na porta ${PORT}`);
+});
