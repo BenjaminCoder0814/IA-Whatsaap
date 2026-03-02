@@ -74,6 +74,13 @@ Extração:
 - Estrutura: `{ telefone, historico: [ { role: "cliente" | "ia", text, ts } ] }`
 - A pasta `data/conversas` é criada automaticamente ao iniciar.
 
+## Instalação recomendada para produção
+Para evitar avisos do npm, instale dependências de produção com:
+
+```bash
+npm install --omit=dev
+```
+
 ## Teste rápido com curl (local)
 Use um payload similar ao do iHelp (event MessageReceive):
 ```bash
