@@ -224,12 +224,6 @@ function responder(mensagemBruta) {
   return 'Me diga a aplicação do lacre e a quantidade aproximada para eu ajudar.';
 }
 
-function gerarResposta(mensagemBruta, callId = null) {
-  if (callId) {
-    return gerarRespostaComercial(callId, mensagemBruta);
-  }
-  return responder(mensagemBruta);
-}
 
 function normalizeNumber(num) {
   return String(num || '').replace(/\D/g, '');
