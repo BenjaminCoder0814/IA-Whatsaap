@@ -92,18 +92,18 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
   }
 }
 
-async function sendMessageIhelp({ texto, contato }) {
+async function sendMessageIhelp(numero, mensagem) {
   try {
-    const response = await fetchWithTimeout(`${process.env.IHELP_API_BASE}/api/v2/customers/send-message`, {
+    const response = await fetchWithTimeout('https://api.ihelpchat.com/api/v2/customers/send-message', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${process.env.IHELP_TOKEN}`,
       },
       body: JSON.stringify({
-        texto,
+        texto: mensagem,
         canalId: process.env.IHELP_CANAL_ID,
-        contato,
+        contato: numero,
         messageType: 0,
       }),
     });
