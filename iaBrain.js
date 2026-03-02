@@ -179,9 +179,4 @@ module.exports = {
   }
 
   return "Perfeito. Me explique um pouco mais da sua necessidade para que eu possa te ajudar com precisão.";
-}
 
-module.exports = {
-  gerarResposta,
-  atualizarEstrategia
-};
