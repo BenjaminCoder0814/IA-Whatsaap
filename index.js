@@ -107,12 +107,10 @@ async function sendMessageIhelp(numero, mensagem) {
         messageType: 0,
       }),
     });
-    if (!response.ok) throw new Error(`Erro HTTP: ${response.status}`);
-    console.log('IA respondeu');
-    return await response.json();
-  } catch (err) {
-    console.error('Erro ao enviar mensagem IHELP:', err);
-    return null;
+    const data = await response.text();
+    console.log('Resposta IHELP:', data);
+  } catch (error) {
+    console.error('Erro ao enviar mensagem:', error.message);
   }
 }
 
