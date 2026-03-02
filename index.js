@@ -1,4 +1,4 @@
-// Função para enviar mensagem via IHELP
+// Helper fetchWithTimeout
 let fetch;
 try {
   fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
@@ -6,9 +6,23 @@ try {
   console.error('Dependência node-fetch ausente. Adicione ao package.json.');
 }
 
+async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  options.signal = controller.signal;
+  try {
+    const response = await fetch(url, options);
+    clearTimeout(id);
+    return response;
+  } catch (err) {
+    clearTimeout(id);
+    throw err;
+  }
+}
+
 async function sendMessageIhelp(contato, texto) {
   try {
-    const response = await fetch(`${process.env.IHELP_API_BASE}/api/v2/customers/send-message`, {
+    const response = await fetchWithTimeout(`${process.env.IHELP_API_BASE}/api/v2/customers/send-message`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${process.env.IHELP_TOKEN}`,
@@ -32,7 +46,7 @@ async function sendMessageIhelp(contato, texto) {
 
 async function getCallDetails(callId) {
   try {
-    const response = await fetch(`${process.env.IHELP_API_BASE}/api/v2/customers/${callId}`, {
+    const response = await fetchWithTimeout(`${process.env.IHELP_API_BASE}/api/v2/customers/${callId}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${process.env.IHELP_TOKEN}`,
@@ -64,6 +78,12 @@ const fs = require('fs');
 const path = require('path');
 
 const app = express();
+
+// Middleware para logar todas requisições
+app.use((req, res, next) => {
+  console.log("HTTP", req.method, req.url);
+  next();
+});
 const PORT = process.env.PORT || 3000;
 
 // Validação de variáveis obrigatórias
@@ -233,6 +253,7 @@ app.get('/', (req, res) => {
 
 app.post('/ihelp', async (req, res) => {
   try {
+    console.log("IHELP_HIT");
     console.log('IHELP_PAYLOAD', JSON.stringify(req.body));
 
     // 1) Ignorar eventos que não sejam "MessageReceive"
@@ -254,9 +275,8 @@ app.post('/ihelp', async (req, res) => {
 
     // 4) Extrair callId, whatsAppNumber, texto
     const callId = msg.callId || req.body?.callId;
-    const telefoneRaw = msg.whatsAppNumber || msg.phone || msg.from || req.body?.telefone;
-    const telefone = normalizeNumber(telefoneRaw || '');
-    const texto = extractTextFromPayload(req.body || {});
+    const telefone = normalizeNumber(msg.whatsAppNumber || '');
+    const texto = msg.texto || extractTextFromPayload(req.body || {});
 
     // 6) Proteção contra flood
     if (isFlood(callId)) {
