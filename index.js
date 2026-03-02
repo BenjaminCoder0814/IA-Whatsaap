@@ -94,7 +94,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
 
 async function sendMessageIhelp({ texto, contato }) {
   try {
-    const response = await fetchWithTimeout(`${process.env.IHELP_API_BASE_SEND}/api/v2/customers/send-message`, {
+    const response = await fetchWithTimeout(`${process.env.IHELP_API_BASE}/api/v2/customers/send-message`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -170,10 +170,7 @@ const DATA_DIR = path.join(__dirname, 'data', 'conversas');
 const IHELP_TOKEN = process.env.IHELP_TOKEN || process.env.IHELP_API_TOKEN; // mantém compat com nome antigo
 const IHELP_CANAL_ID = process.env.IHELP_CANAL_ID;
 const IHELP_IA_USER_ID = process.env.IHELP_IA_USER_ID;
-const IHELP_API_BASE_SEND = process.env.IHELP_API_BASE_SEND || 'https://api.ihelpchat.com';
-const IHELP_API_BASE_V3 = process.env.IHELP_API_BASE_V3 || 'https://apiv3.ihelpchat.com';
-const IHELP_API_SEND_MESSAGE = `${IHELP_API_BASE_SEND}/api/v2/customers/send-message`;
-const IHELP_API_CUSTOMER = (callId) => `${IHELP_API_BASE_V3}/api/v2/customers/${callId}`;
+// Usar apenas apiv3.ihelpchat.com
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
