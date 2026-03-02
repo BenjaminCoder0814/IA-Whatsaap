@@ -119,14 +119,18 @@ async function sendMessageIhelp(numero, mensagem) {
 // Função para checar se há humano ativo
 async function temHumanoAtivo(callId) {
   try {
-    const response = await fetchWithTimeout(`${process.env.IHELP_API_BASE}/api/v2/customers/${callId}`, {
+    const response = await fetchWithTimeout(`https://api.ihelpchat.com/api/v2/customers/${callId}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${process.env.IHELP_TOKEN}`,
         'Content-Type': 'application/json',
       },
     });
-    if (!response.ok) throw new Error(`Erro HTTP: ${response.status}`);
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error(`Erro ao consultar atendimento: HTTP ${response.status} - ${errText}`);
+      return false;
+    }
     const data = await response.json();
     if (data?.dados?.atendimentoUsuarios?.length > 0) {
       return true;
