@@ -92,13 +92,13 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
   }
 }
 
-async function sendMessageIhelp(contato, texto) {
+async function sendMessageIhelp({ texto, contato }) {
   try {
-    const response = await fetchWithTimeout(`${process.env.IHELP_API_BASE}/api/v2/customers/send-message`, {
+    const response = await fetchWithTimeout(`${process.env.IHELP_API_BASE_SEND}/api/v2/customers/send-message`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${process.env.IHELP_TOKEN}`,
         'Content-Type': 'application/json',
+        Authorization: `Bearer ${process.env.IHELP_TOKEN}`,
       },
       body: JSON.stringify({
         texto,
@@ -332,64 +332,53 @@ app.get('/', (req, res) => {
 
 app.post('/ihelp', async (req, res) => {
   try {
-    console.log("IHELP_HIT");
-    console.log('IHELP_PAYLOAD', JSON.stringify(req.body));
+    const { event, message } = req.body;
 
-    // 1) Ignorar eventos que não sejam "MessageReceive"
-    if (req.body?.event !== 'MessageReceive') {
-      return res.status(200).json({ ok: true, ignored: 'not MessageReceive' });
+    if (event !== "MessageReceive") {
+      return res.status(200).json({ ok: true });
+    }
+    if (!message) {
+      return res.status(200).json({ ok: true });
     }
 
-    const msg = req.body?.message || {};
+    const { callId, fromMe, messageType, texto, whatsAppNumber } = message;
 
-    // 2) Ignorar mensagens onde fromMe === true
-    if (msg.fromMe === true) {
-      return res.status(200).json({ ok: true, ignored: 'fromMe' });
+    if (fromMe) {
+      return res.status(200).json({ ok: true });
+    }
+    if (messageType !== "Text") {
+      return res.status(200).json({ ok: true });
+    }
+    if (!texto || !whatsAppNumber) {
+      return res.status(200).json({ ok: true });
     }
 
-    // 3) Ignorar messageType diferente de "Text"
-    if (msg.messageType && msg.messageType !== 'Text') {
-      return res.status(200).json({ ok: true, ignored: 'non-text' });
-    }
+    console.log("Mensagem recebida:", texto);
 
-    // 4) Extrair callId, whatsAppNumber, texto
-    const callId = msg.callId || req.body?.callId;
-    const telefone = normalizeNumber(msg.whatsAppNumber || '');
-    const texto = msg.texto || extractTextFromPayload(req.body || {});
-
-    // 6) Proteção contra flood
+    // Proteção contra flood
     if (isFlood(callId)) {
       console.log('Flood detectado, ignorando callId:', callId);
-      return res.status(200).json({ ok: true, ignored: 'flood' });
+      return res.status(200).json({ ok: true });
     }
 
-    // 5) Consultar atendimento
-    let atendimentoUsuarios = [];
-    try {
-      atendimentoUsuarios = await getCallDetails(callId);
-    } catch (err) {
-      console.error('Erro ao consultar atendimento:', err);
-    }
-
-    // 6) Verificar se há humano ativo
+    // Bloqueio se humano ativo
     if (await temHumanoAtivo(callId)) {
       console.log('Humano ativo, IA não respondeu');
-      return res.status(200).json({ ok: true, skipped: 'human_present' });
+      return res.status(200).json({ ok: true });
     }
 
-    // 7) Caso não haja humano, gerar resposta e enviar
+    // Gerar resposta e enviar
     try {
       const resposta = gerarResposta(callId, texto);
-      await sendMessageIhelp(telefone, resposta);
+      await sendMessageIhelp(whatsAppNumber, resposta);
       console.log('IA respondeu:', resposta);
     } catch (err) {
       console.error('Erro ao responder via IA:', err);
     }
 
-    // 8) Sempre retornar 200 { ok: true }
     return res.status(200).json({ ok: true });
   } catch (err) {
-    console.error('Erro no /ihelp', err);
+    console.error('Erro no webhook:', err);
     return res.status(200).json({ ok: true });
   }
 });
