@@ -110,23 +110,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
       }
     });
 
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`Servidor iniciado na porta ${PORT}`);
-    });
-    return null;
-  }
-}
-// Importa o cérebro estratégico
 
-// Personalidade e contexto da IA
-const promptBase = `
-Você é ZENITH IA (Vendas), especialista em lacres industriais.
-Seu objetivo é conduzir o cliente até o fechamento da venda.
-Nunca dê desconto automaticamente.
-Sempre pergunte volume e aplicação antes de passar preço.
-Se o cliente demonstrar urgência, conduza para pedido imediato.
-Tom de voz: profissional, seguro, técnico, direto.
-`;
 
 const estilo = `
 Responda de forma clara, segura e estratégica.
