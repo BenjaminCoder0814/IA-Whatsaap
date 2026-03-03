@@ -92,7 +92,7 @@ async function temHumanoAtivo(callId) {
 async function sendMessageIhelp(numero, mensagem) {
   try {
     const resp = await fetchWithTimeout(
-      `${IHELP_API_BASE_SEND}/api/v2/customers/send-message`,
+      `${IHELP_API_BASE_V3}/api/v2/customers/send-message`,
       {
         method: "POST",
         headers: {
