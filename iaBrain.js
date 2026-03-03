@@ -1,5 +1,5 @@
-function gerarResposta(callId, mensagem) {
-// iaBrain.js
+
+// iaBrain.js enxuto e sem break/case/switch inválido
 const estados = new Map();
 
 function getEstado(callId) {
@@ -89,8 +89,5 @@ function gerarResposta(callId, textoCliente) {
 }
 
 module.exports = { gerarResposta, getEstado };
-}
-
-module.exports = { gerarResposta };
 
 

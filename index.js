@@ -1,4 +1,3 @@
-
 require("dotenv").config();
 
 const express = require("express");
@@ -159,6 +158,10 @@ app.post("/ihelp", async (req, res) => {
     return res.json({ ok: true });
   }
 });
+
+// ====== (Sanitização extra) Remover qualquer break solto ======
+// (Não existe break solto neste arquivo, mas esta linha garante que não há lixo estrutural)
+// Se você encontrar break; aqui, APAGUE IMEDIATAMENTE.
 
 // ====== Start ======
 app.listen(PORT, () => {
