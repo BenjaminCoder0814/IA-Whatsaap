@@ -21,6 +21,7 @@ async function encaminharAtendimento(callId, departamentoId) {
     console.error('Erro ao transferir atendimento:', error.message);
     return null;
   }
+}
 // Importa o cérebro estratégico
 const { gerarResposta } = require("./iaBrain");
 // Personalidade e contexto da IA
