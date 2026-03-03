@@ -4,7 +4,7 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 
-const { gerarResposta } = require("./iaBrain");
+
 
 const app = express();
 app.use(cors());
