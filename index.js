@@ -177,7 +177,17 @@ app.post("/ihelp", async (req, res) => {
 // ====== Start ======
 if (!PORT) {
   console.error("ERRO: Variável de ambiente PORT não definida. Railway exige process.env.PORT.");
-  process.exit(1);
+  // process.exit(1); // Removed to prevent crash
+}
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Servidor iniciado na porta ${PORT}`);
+});
+let gerarResposta;
+try {
+  ({ gerarResposta } = require("./iaBrain"));
+} catch (err) {
+  console.error("ERRO ao importar iaBrain.js:", err);
+  gerarResposta = () => "Desculpe, houve um erro interno na IA.";
 }
 
 // Guardrail: modo seguro para evitar crash do Node
