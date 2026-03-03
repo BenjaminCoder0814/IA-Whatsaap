@@ -179,9 +179,7 @@ if (!PORT) {
   console.error("ERRO: Variável de ambiente PORT não definida. Railway exige process.env.PORT.");
   process.exit(1);
 }
-app.listen(PORT, () => {
-  console.log(`Servidor iniciado na porta ${PORT}`);
-});
+
 // Guardrail: modo seguro para evitar crash do Node
 process.on("uncaughtException", (err) => console.error("UNCAUGHT", err));
 process.on("unhandledRejection", (err) => console.error("UNHANDLED", err));
