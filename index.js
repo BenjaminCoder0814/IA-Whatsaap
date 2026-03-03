@@ -2,12 +2,7 @@ require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
-let fetch;
-try {
-  fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
-} catch (err) {
-  console.error('Dependência node-fetch ausente ou erro de importação.');
-}
+const fetch = require('node-fetch');
 const { gerarResposta } = require("./iaBrain");
 
 const app = express();
