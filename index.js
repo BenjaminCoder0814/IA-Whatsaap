@@ -1,3 +1,181 @@
+// index.js (versão enxuta e estável)
+require("dotenv").config();
+
+const express = require("express");
+const cors = require("cors");
+
+const { gerarResposta } = require("./iaBrain");
+
+const app = express();
+app.use(cors());
+app.use(express.json({ limit: "1mb" }));
+
+// ====== ENV ======
+const IHELP_TOKEN = process.env.IHELP_TOKEN;
+
+const IHELP_IA_USER_ID = String(process.env.IHELP_IA_USER_ID || "");
+const IHELP_API_BASE_SEND = process.env.IHELP_API_BASE_SEND || "https://api.ihelpchat.com";
+const IHELP_API_BASE_V3 = process.env.IHELP_API_BASE_V3 || "https://apiv3.ihelpchat.com";
+
+const PORT = process.env.PORT || 8080;
+
+// ====== Guardrails anti-crash ======
+process.on("uncaughtException", (err) => console.error("UNCAUGHT", err));
+process.on("unhandledRejection", (err) => console.error("UNHANDLED", err));
+
+// ====== Middleware de log ======
+app.use((req, res, next) => {
+  console.log("HTTP", req.method, req.url);
+  next();
+});
+
+// ====== Health ======
+app.get("/", (req, res) => res.send("Zenith IA online ✅"));
+
+// ====== Helpers ======
+async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const resp = await fetch(url, { ...options, signal: controller.signal });
+    return resp;
+  } catch (err) {
+    console.error("fetchWithTimeout error:", err.message);
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function onlyDigits(v) {
+  return String(v || "").replace(/\D/g, "");
+}
+
+// flood protection (3s por callId)
+const floodCache = new Map();
+function isFlood(callId) {
+  const now = Date.now();
+  const last = floodCache.get(callId);
+  if (last && now - last < 3000) return true;
+  floodCache.set(callId, now);
+  return false;
+}
+
+async function getAttendance(callId) {
+  const url = `${IHELP_API_BASE_V3}/api/v2/customers/${encodeURIComponent(callId)}`;
+  const resp = await fetchWithTimeout(url, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${IHELP_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!resp) return null;
+
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => "");
+    console.error("Erro GET atendimento:", resp.status, txt);
+    return null;
+  }
+
+  return resp.json().catch(() => null);
+}
+
+async function hasHumanActive(callId) {
+  const data = await getAttendance(callId);
+  const usuarios = data?.dados?.atendimentoUsuarios || [];
+
+  // humano ativo = existe usuario.id diferente do ID da IA
+  return Array.isArray(usuarios) && usuarios.some((u) => String(u?.usuario?.id || u?.userId || "") !== IHELP_IA_USER_ID);
+}
+
+async function sendMessageIhelp(contato, texto) {
+  const url = `${IHELP_API_BASE_SEND}/api/v2/customers/send-message`;
+
+  const resp = await fetchWithTimeout(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${IHELP_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      texto,
+      canalId: IHELP_CANAL_ID,
+      contato,
+      messageType: 0,
+    }),
+  });
+
+  if (!resp) return false;
+
+  const body = await resp.text().catch(() => "");
+  if (!resp.ok) {
+    console.error("Erro send-message:", resp.status, body);
+    return false;
+  }
+
+  console.log("send-message OK:", body);
+  return true;
+}
+
+// ====== Webhook ======
+app.post("/ihelp", async (req, res) => {
+  try {
+    if (!IHELP_TOKEN || !IHELP_CANAL_ID || !IHELP_IA_USER_ID) {
+      console.error("ENV incompleta: defina IHELP_TOKEN, IHELP_CANAL_ID, IHELP_IA_USER_ID");
+      return res.status(200).json({ ok: true });
+    }
+
+    const { event, message } = req.body || {};
+
+    if (event !== "MessageReceive") return res.status(200).json({ ok: true });
+    if (!message) return res.status(200).json({ ok: true });
+
+    const callId = message.callId;
+    const fromMe = !!message.fromMe;
+    const messageType = message.messageType;
+    const texto = message.texto;
+    const whatsAppNumber = onlyDigits(message.whatsAppNumber);
+
+    if (!callId || fromMe) return res.status(200).json({ ok: true });
+    if (messageType !== "Text") return res.status(200).json({ ok: true });
+    if (!texto || !whatsAppNumber) return res.status(200).json({ ok: true });
+
+    console.log("Mensagem recebida:", texto, "callId:", callId);
+
+    if (isFlood(callId)) {
+      console.log("Flood detectado:", callId);
+      return res.status(200).json({ ok: true });
+    }
+
+    const humanoAtivo = await hasHumanActive(callId);
+    if (humanoAtivo) {
+      console.log("Humano ativo, IA não responde:", callId);
+      return res.status(200).json({ ok: true });
+    }
+
+    let resposta;
+    try {
+      resposta = gerarResposta(callId, texto);
+      if (typeof resposta !== "string") resposta = String(resposta);
+    } catch (err) {
+      console.error("IA_BRAIN_ERROR:", err);
+      resposta = "Perfeito. Para eu te ajudar com precisão: qual a aplicação do lacre e o volume mensal aproximado?";
+    }
+
+    const ok = await sendMessageIhelp(whatsAppNumber, resposta);
+    console.log("IA enviou?", ok, "Resposta:", resposta);
+
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error("Erro no /ihelp:", err);
+    return res.status(200).json({ ok: true });
+  }
+});
+
+// ====== Start ======
+app.listen(PORT, () => console.log(`Servidor iniciado na porta ${PORT}`));
 // Guardrail: modo seguro para evitar crash do Node
 process.on("uncaughtException", (err) => console.error("UNCAUGHT", err));
 process.on("unhandledRejection", (err) => console.error("UNHANDLED", err));
@@ -23,7 +201,7 @@ async function encaminharAtendimento(callId, departamentoId) {
   }
 }
 // Importa o cérebro estratégico
-const { gerarResposta } = require("./iaBrain");
+
 // Personalidade e contexto da IA
 const promptBase = `
 Você é ZENITH IA (Vendas), especialista em lacres industriais.
@@ -166,7 +344,7 @@ async function temHumanoAtivo(callId) {
 }
 
 // Proteção contra flood
-const floodCache = new Map(); // callId -> timestamp
+
 function isFlood(callId) {
   const now = Date.now();
   const last = floodCache.get(callId);
@@ -175,28 +353,28 @@ function isFlood(callId) {
   return false;
 }
 require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
+
+
 const fs = require('fs');
 const path = require('path');
 
-const app = express();
+
 
 // Middleware para logar todas requisições
 app.use((req, res, next) => {
   console.log("HTTP", req.method, req.url);
   next();
 });
-const PORT = process.env.PORT || 8080;
+
 
 // Validação de variáveis obrigatórias
 if (!process.env.IHELP_TOKEN || !process.env.IHELP_CANAL_ID || !process.env.IHELP_IA_USER_ID || !process.env.IHELP_API_BASE) {
   console.error('❌ Variáveis obrigatórias ausentes no .env. Verifique IHELP_TOKEN, IHELP_CANAL_ID, IHELP_IA_USER_ID, IHELP_API_BASE.');
 }
 const DATA_DIR = path.join(__dirname, 'data', 'conversas');
-const IHELP_TOKEN = process.env.IHELP_TOKEN || process.env.IHELP_API_TOKEN; // mantém compat com nome antigo
+
 const IHELP_CANAL_ID = process.env.IHELP_CANAL_ID;
-const IHELP_IA_USER_ID = process.env.IHELP_IA_USER_ID;
+
 // Usar apenas apiv3.ihelpchat.com
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
