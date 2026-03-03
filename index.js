@@ -66,99 +66,17 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
         if (!message) return res.status(200).json({ ok: true });
         const callId = message.callId;
         const fromMe = !!message.fromMe;
-        const messageType = message.messageType;
-        const texto = message.texto;
-        const whatsAppNumber = String(message.whatsAppNumber || "").replace(/\D/g, "");
-        if (!callId || fromMe) return res.status(200).json({ ok: true });
-        if (messageType !== "Text") return res.status(200).json({ ok: true });
-        if (!texto || !whatsAppNumber) return res.status(200).json({ ok: true });
-        let resposta;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
         try {
-          resposta = gerarResposta(callId, texto);
-          if (typeof resposta !== "string") resposta = String(resposta);
+          const resp = await fetch(url, { ...options, signal: controller.signal });
+          return resp;
         } catch (err) {
-          console.error("IA_BRAIN_ERROR:", err);
-          resposta = "Desculpe, houve um erro interno na IA.";
+          console.error("fetchWithTimeout error:", err.message);
+          return null;
+        } finally {
+          clearTimeout(timeout);
         }
-        try {
-          const resp = await fetch(`${IHELP_API_BASE_SEND}/api/v2/customers/send-message`, {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${IHELP_TOKEN}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              texto: resposta,
-              canalId: IHELP_CANAL_ID,
-              contato: whatsAppNumber,
-              messageType: 0,
-            }),
-          });
-          const body = await resp.text().catch(() => "");
-          if (!resp.ok) {
-            console.error("Erro send-message:", resp.status, body);
-          } else {
-            console.log("send-message OK:", body);
-          }
-        } catch (err) {
-          console.error("Erro ao enviar mensagem:", err);
-        }
-        return res.status(200).json({ ok: true });
-      } catch (err) {
-        console.error("Erro no /ihelp:", err);
-        return res.status(200).json({ ok: true });
-      }
-    });
-
-
-
-const estilo = `
-Responda de forma clara, segura e estratégica.
-Seja objetivo.
-Evite textos longos demais.
-Use persuasão baseada em autoridade e experiência.
-`;
-
-// Controle de estágio por callId
-const estagios = {};
-
-function classificarIntencao(texto) {
-  const t = texto.toLowerCase();
-  if (t.includes("preço") || t.includes("valor")) return "preco";
-  if (t.includes("prazo")) return "prazo";
-  if (t.includes("catálogo")) return "catalogo";
-  if (t.includes("quantidade") || t.includes("volume")) return "volume";
-  if (t.includes("desconto")) return "desconto";
-  if (t.includes("outro fornecedor")) return "concorrente";
-  return "geral";
-}
-
-function gerarRespostaComercial(callId, texto) {
-  // Inicializa estágio se não existir
-  if (!estagios[callId]) {
-    estagios[callId] = { etapa: "qualificacao", produto: null, volume: null };
-  }
-  const intencao = classificarIntencao(texto);
-  let resposta = "";
-  switch (intencao) {
-    case "preco":
-      resposta = "Antes de passar o preço, poderia informar a aplicação e o volume aproximado?";
-      estagios[callId].etapa = "preco";
-      break;
-    case "prazo":
-      resposta = "Qual a urgência do seu pedido? Assim consigo te ajudar melhor.";
-      estagios[callId].etapa = "prazo";
-      break;
-    case "catalogo":
-      resposta = "Posso te enviar nosso catálogo digital. Qual produto você procura?";
-      estagios[callId].etapa = "catalogo";
-      break;
-    case "volume":
-      resposta = "Ótimo! Qual a aplicação do lacre? Precisa para caminhão, container ou outro uso?";
-      estagios[callId].volume = texto.match(/\d+/)?.[0] || null;
-      estagios[callId].etapa = "volume";
-      break;
-    case "desconto":
       resposta = "Trabalhamos sempre com qualidade e segurança. O diferencial Zenith é o suporte técnico e entrega rápida.";
       estagios[callId].etapa = "desconto";
       break;
