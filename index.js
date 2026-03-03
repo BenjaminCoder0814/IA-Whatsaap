@@ -182,13 +182,7 @@ if (!PORT) {
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Servidor iniciado na porta ${PORT}`);
 });
-let gerarResposta;
-try {
-  ({ gerarResposta } = require("./iaBrain"));
-} catch (err) {
-  console.error("ERRO ao importar iaBrain.js:", err);
-  gerarResposta = () => "Desculpe, houve um erro interno na IA.";
-}
+const { gerarResposta } = require("./iaBrain");
 
 // Guardrail: modo seguro para evitar crash do Node
 process.on("uncaughtException", (err) => console.error("UNCAUGHT", err));
