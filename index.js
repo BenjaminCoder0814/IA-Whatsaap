@@ -2,7 +2,12 @@ require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
-const fetch = require("node-fetch");
+let fetch;
+try {
+  fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+} catch (err) {
+  console.error('Dependência node-fetch ausente ou erro de importação.');
+}
 const { gerarResposta } = require("./iaBrain");
 
 const app = express();
@@ -46,15 +51,14 @@ function isFlood(callId) {
 async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
   try {
     const response = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(timeout);
     return response;
   } catch (err) {
+    clearTimeout(timeout);
     console.error("fetch error:", err.message);
     return null;
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
