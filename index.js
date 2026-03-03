@@ -1,3 +1,6 @@
+// Guardrail: modo seguro para evitar crash do Node
+process.on("uncaughtException", (err) => console.error("UNCAUGHT", err));
+process.on("unhandledRejection", (err) => console.error("UNHANDLED", err));
 // Função para encaminhar atendimento para departamento
 async function encaminharAtendimento(callId, departamentoId) {
   try {
@@ -18,7 +21,6 @@ async function encaminharAtendimento(callId, departamentoId) {
     console.error('Erro ao transferir atendimento:', error.message);
     return null;
   }
-}
 // Importa o cérebro estratégico
 const { gerarResposta } = require("./iaBrain");
 // Personalidade e contexto da IA
