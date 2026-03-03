@@ -2,7 +2,6 @@
   const palavrasTransferir = ["atendente", "vendedor", "humano", "pessoa", "ligação", "telefone"];
   if (palavrasTransferir.some(p => texto.includes(p))) {
     return { textoResposta: "Vou te encaminhar para um consultor especializado.", acao: "transferir" };
-  }
 
   // Gatilho de transferência quando lead qualificado
   if (estado.operacao && estado.volume && estado.urgencia) {
