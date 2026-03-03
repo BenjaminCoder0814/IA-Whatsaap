@@ -17,7 +17,7 @@ const IHELP_IA_USER_ID = String(process.env.IHELP_IA_USER_ID || "");
 const IHELP_API_BASE_SEND = process.env.IHELP_API_BASE_SEND || "https://api.ihelpchat.com";
 const IHELP_API_BASE_V3 = process.env.IHELP_API_BASE_V3 || "https://apiv3.ihelpchat.com";
 
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT;
 
 // ====== Guardrails anti-crash ======
 process.on("uncaughtException", (err) => console.error("UNCAUGHT", err));
