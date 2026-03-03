@@ -38,173 +38,81 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const resp = await fetch(url, { ...options, signal: controller.signal });
-    return resp;
-  } catch (err) {
-    console.error("fetchWithTimeout error:", err.message);
-    return null;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
 
-function onlyDigits(v) {
-  return String(v || "").replace(/\D/g, "");
-}
+    require("dotenv").config();
+    const express = require("express");
+    const cors = require("cors");
+    const fetch = require("node-fetch");
+    const { gerarResposta } = require("./iaBrain");
 
-// flood protection (3s por callId)
-const floodCache = new Map();
-function isFlood(callId) {
-  const now = Date.now();
-  const last = floodCache.get(callId);
-  if (last && now - last < 3000) return true;
-  floodCache.set(callId, now);
-  return false;
-}
+    const app = express();
+    app.use(cors());
+    app.use(express.json({ limit: "1mb" }));
 
-async function getAttendance(callId) {
-  const url = `${IHELP_API_BASE_V3}/api/v2/customers/${encodeURIComponent(callId)}`;
-  const resp = await fetchWithTimeout(url, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${IHELP_TOKEN}`,
-      "Content-Type": "application/json",
-    },
-  });
+    const IHELP_TOKEN = process.env.IHELP_TOKEN;
+    const IHELP_CANAL_ID = process.env.IHELP_CANAL_ID;
+    const IHELP_API_BASE_SEND = process.env.IHELP_API_BASE_SEND || "https://api.ihelpchat.com";
+    const PORT = process.env.PORT || 3000;
 
-  if (!resp) return null;
+    process.on("uncaughtException", (err) => console.error("UNCAUGHT ERROR:", err));
+    process.on("unhandledRejection", (err) => console.error("UNHANDLED REJECTION:", err));
 
-  if (!resp.ok) {
-    const txt = await resp.text().catch(() => "");
-    console.error("Erro GET atendimento:", resp.status, txt);
-    return null;
-  }
+    app.get("/", (req, res) => res.send("Zenith IA online ✅"));
 
-  return resp.json().catch(() => null);
-}
-
-async function hasHumanActive(callId) {
-  const data = await getAttendance(callId);
-  const usuarios = data?.dados?.atendimentoUsuarios || [];
-
-  // humano ativo = existe usuario.id diferente do ID da IA
-  return Array.isArray(usuarios) && usuarios.some((u) => String(u?.usuario?.id || u?.userId || "") !== IHELP_IA_USER_ID);
-}
-
-async function sendMessageIhelp(contato, texto) {
-  const url = `${IHELP_API_BASE_SEND}/api/v2/customers/send-message`;
-
-  const resp = await fetchWithTimeout(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${IHELP_TOKEN}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      texto,
-      canalId: IHELP_CANAL_ID,
-      contato,
-      messageType: 0,
-    }),
-  });
-
-  if (!resp) return false;
-
-  const body = await resp.text().catch(() => "");
-  if (!resp.ok) {
-    console.error("Erro send-message:", resp.status, body);
-    return false;
-  }
-
-  console.log("send-message OK:", body);
-  return true;
-}
-
-// ====== Webhook ======
-app.post("/ihelp", async (req, res) => {
-  try {
-    if (!IHELP_TOKEN || !IHELP_CANAL_ID || !IHELP_IA_USER_ID) {
-      console.error("ENV incompleta: defina IHELP_TOKEN, IHELP_CANAL_ID, IHELP_IA_USER_ID");
-      return res.status(200).json({ ok: true });
-    }
-
-    const { event, message } = req.body || {};
-
-    if (event !== "MessageReceive") return res.status(200).json({ ok: true });
-    if (!message) return res.status(200).json({ ok: true });
-
-    const callId = message.callId;
-    const fromMe = !!message.fromMe;
-    const messageType = message.messageType;
-    const texto = message.texto;
-    const whatsAppNumber = onlyDigits(message.whatsAppNumber);
-
-    if (!callId || fromMe) return res.status(200).json({ ok: true });
-    if (messageType !== "Text") return res.status(200).json({ ok: true });
-    if (!texto || !whatsAppNumber) return res.status(200).json({ ok: true });
-
-    console.log("Mensagem recebida:", texto, "callId:", callId);
-
-    if (isFlood(callId)) {
-      console.log("Flood detectado:", callId);
-      return res.status(200).json({ ok: true });
-    }
-
-    const humanoAtivo = await hasHumanActive(callId);
-    if (humanoAtivo) {
-      console.log("Humano ativo, IA não responde:", callId);
-      return res.status(200).json({ ok: true });
-    }
-
-    let resposta;
-    try {
-      resposta = gerarResposta(callId, texto);
-      if (typeof resposta !== "string") resposta = String(resposta);
-    } catch (err) {
-      console.error("IA_BRAIN_ERROR:", err);
-      resposta = "Perfeito. Para eu te ajudar com precisão: qual a aplicação do lacre e o volume mensal aproximado?";
-    }
-
-    const ok = await sendMessageIhelp(whatsAppNumber, resposta);
-    console.log("IA enviou?", ok, "Resposta:", resposta);
-
-    return res.status(200).json({ ok: true });
-  } catch (err) {
-    console.error("Erro no /ihelp:", err);
-    return res.status(200).json({ ok: true });
-  }
-});
-
-// ====== Start ======
-if (!PORT) {
-  console.error("ERRO: Variável de ambiente PORT não definida. Railway exige process.env.PORT.");
-  // process.exit(1); // Removed to prevent crash
-}
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Servidor iniciado na porta ${PORT}`);
-});
-const { gerarResposta } = require("./iaBrain");
-
-// Guardrail: modo seguro para evitar crash do Node
-process.on("uncaughtException", (err) => console.error("UNCAUGHT", err));
-process.on("unhandledRejection", (err) => console.error("UNHANDLED", err));
-// Função para encaminhar atendimento para departamento
-async function encaminharAtendimento(callId, departamentoId) {
-  try {
-    // Endpoint fictício, ajuste conforme documentação oficial do iHelp
-    const response = await fetchWithTimeout(`https://api.ihelpchat.com/api/v2/customers/${callId}/transfer`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${process.env.IHELP_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ departamentoId })
+    app.post("/ihelp", async (req, res) => {
+      try {
+        const { event, message } = req.body || {};
+        if (event !== "MessageReceive") return res.status(200).json({ ok: true });
+        if (!message) return res.status(200).json({ ok: true });
+        const callId = message.callId;
+        const fromMe = !!message.fromMe;
+        const messageType = message.messageType;
+        const texto = message.texto;
+        const whatsAppNumber = String(message.whatsAppNumber || "").replace(/\D/g, "");
+        if (!callId || fromMe) return res.status(200).json({ ok: true });
+        if (messageType !== "Text") return res.status(200).json({ ok: true });
+        if (!texto || !whatsAppNumber) return res.status(200).json({ ok: true });
+        let resposta;
+        try {
+          resposta = gerarResposta(callId, texto);
+          if (typeof resposta !== "string") resposta = String(resposta);
+        } catch (err) {
+          console.error("IA_BRAIN_ERROR:", err);
+          resposta = "Desculpe, houve um erro interno na IA.";
+        }
+        try {
+          const resp = await fetch(`${IHELP_API_BASE_SEND}/api/v2/customers/send-message`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${IHELP_TOKEN}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              texto: resposta,
+              canalId: IHELP_CANAL_ID,
+              contato: whatsAppNumber,
+              messageType: 0,
+            }),
+          });
+          const body = await resp.text().catch(() => "");
+          if (!resp.ok) {
+            console.error("Erro send-message:", resp.status, body);
+          } else {
+            console.log("send-message OK:", body);
+          }
+        } catch (err) {
+          console.error("Erro ao enviar mensagem:", err);
+        }
+        return res.status(200).json({ ok: true });
+      } catch (err) {
+        console.error("Erro no /ihelp:", err);
+        return res.status(200).json({ ok: true });
+      }
     });
-    const data = await response.text();
-    console.log(`TRANSFERINDO callId ${callId} para depto ${departamentoId}`);
-    console.log('Resposta transferência:', data);
-    return data;
-  } catch (error) {
-    console.error('Erro ao transferir atendimento:', error.message);
+
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Servidor iniciado na porta ${PORT}`);
+    });
     return null;
   }
 }
