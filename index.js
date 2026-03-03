@@ -1,3 +1,24 @@
+// Função para encaminhar atendimento para departamento
+async function encaminharAtendimento(callId, departamentoId) {
+  try {
+    // Endpoint fictício, ajuste conforme documentação oficial do iHelp
+    const response = await fetchWithTimeout(`https://api.ihelpchat.com/api/v2/customers/${callId}/transfer`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.IHELP_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ departamentoId })
+    });
+    const data = await response.text();
+    console.log(`TRANSFERINDO callId ${callId} para depto ${departamentoId}`);
+    console.log('Resposta transferência:', data);
+    return data;
+  } catch (error) {
+    console.error('Erro ao transferir atendimento:', error.message);
+    return null;
+  }
+}
 // Importa o cérebro estratégico
 const { gerarResposta } = require("./iaBrain");
 // Personalidade e contexto da IA
@@ -366,8 +387,14 @@ app.post(['/ihelp', '/pt/ihelp'], async (req, res) => {
     // Gerar resposta e enviar
     try {
       const resposta = gerarResposta(callId, texto);
-      await sendMessageIhelp(whatsAppNumber, resposta);
-      console.log('IA respondeu:', resposta);
+      if (typeof resposta === 'object' && resposta.acao === 'transferir') {
+        await sendMessageIhelp(whatsAppNumber, resposta.textoResposta);
+        await encaminharAtendimento(callId, 1); // departamentoId padrão 1
+        console.log(`TRANSFERINDO callId ${callId} para depto 1`);
+      } else {
+        await sendMessageIhelp(whatsAppNumber, resposta);
+        console.log('IA respondeu:', resposta);
+      }
     } catch (err) {
       console.error('Erro ao responder via IA:', err);
     }

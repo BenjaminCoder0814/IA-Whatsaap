@@ -1,3 +1,13 @@
+  // Detecção de intenção de transferência para humano
+  const palavrasTransferir = ["atendente", "vendedor", "humano", "pessoa", "ligação", "telefone"];
+  if (palavrasTransferir.some(p => texto.includes(p))) {
+    return { textoResposta: "Vou te encaminhar para um consultor especializado.", acao: "transferir" };
+  }
+
+  // Gatilho de transferência quando lead qualificado
+  if (estado.operacao && estado.volume && estado.urgencia) {
+    return { textoResposta: "Perfeito, vou te encaminhar para um consultor finalizar seu orçamento.", acao: "transferir" };
+  }
 
   }
 
@@ -77,5 +87,4 @@
   // fallback: saudação estratégica
   estado.etapa = "saudacao";
   return DNA + "\nOlá! Para indicar o lacre ideal, preciso entender sua operação. Você utiliza para transporte rodoviário, container, granel ou outro tipo?";
-}
 
